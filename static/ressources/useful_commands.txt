@@ -1,0 +1,3 @@
+1. To update the enviromnent.yaml in your project:
+    \> conda env export --no-builds > C:\Users\mauri\miniconda3\envs\GPBO\project\config\environment.yaml
+
