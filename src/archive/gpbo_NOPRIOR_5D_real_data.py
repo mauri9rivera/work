@@ -8,7 +8,7 @@ import scipy.stats as stats
 import torch
 import gpytorch
 import os
-#from utils import *
+from utils import *
 import scipy.io
 
 np.random.seed(0)
@@ -81,11 +81,22 @@ def optimize(model, likelihood, training_iter, train_x, train_y, verbose= True):
 
 """## **Prior creation** """
 
-device='cpu'  # 'cuda' to use GPU\
-data = scipy.io.loadmat('data/5d_rats_set/rCer1.5/ART_REJ/4x4x4x32x8_ar/4x4x4x32x8_ar.mat')['Data']
+device='cuda'  # 'cuda' to use GPU
 
+# New dataset
+#data = scipy.io.loadmat('./data/5d_rats_dataset/5D_step4.mat') #scipy.io.loadmat('data/rCer1.5/ART_REJ/4x4x4x32x8_ar/4x4x4x32x8_ar.mat')['Data']
+#response = data['emg_response']
+#response = response[:, :, :, 0]
+#param = data['stim_combinations']
+#ch2xy = param[:32,[-2,-1]].astype(int) - 1
+#ch2xy = param[:, [0,1,2,5,6]]
+
+#old dataset
+data = scipy.io.loadmat('data/5d_rats_dataset/4x4x4x32x8_ar.mat')['Data']
 ch2xy = data[0][0][1][:,[0,1,2,5,6]]
 response = data[0][0][0]
+
+
 
 ch2xy = torch.from_numpy(ch2xy).float().to(device)
 response = torch.from_numpy(response).float().to(device)
@@ -93,7 +104,7 @@ response = torch.from_numpy(response).float().to(device)
 which_opt='kappa' 
 
 
-this_opt=np.array([12.5])
+this_opt=np.array([5.0])
 
 n_subjects=4 # all 4 emgs 
 n_cond=1 
@@ -108,8 +119,8 @@ nrnd=5
 noise_min=0.25
 noise_max=10
 MaxQueries =200
-kappa=20
-nRep=75
+kappa=5.0
+nRep=10
 total_size= np.prod(dim_sizes)
 
 #hyperparams = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries,n_dims+2), device=device) # hyperparameters
@@ -118,7 +129,7 @@ total_size= np.prod(dim_sizes)
 PP = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries), device=device)
 PP_t = torch.zeros((n_subjects,n_cond, len(this_opt),nRep, MaxQueries), device=device)
 # UCBMAP = torch.zeros((n_subjects,n_cond, len(this_opt),nRep,MaxQueries,DimSearchSpace),device=device)
-Q = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries), device=device)
+# Q = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries), device=device)
 # BQ = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries), device=device)
 
 
@@ -128,7 +139,7 @@ for s_i in range(n_subjects): # for each subject
 
     for c_i in range(n_cond):
         
-        #print(c_i)
+        print(c_i)
         
         # "Ground truth" map
         MPm= torch.mean(response[:, s_i], axis = 0)
@@ -136,7 +147,7 @@ for s_i in range(n_subjects): # for each subject
 
         for k_i in range(len(this_opt)): # for each hyperparameter value 
 
-            #print(which_opt + ' value :' + str(this_opt[k_i]))
+            print(which_opt + ' value :' + str(this_opt[k_i]))
 
             if which_opt=='nrnd':
                 nrnd= this_opt[k_i]
@@ -338,8 +349,8 @@ for s_i in range(n_subjects): # for each subject
                 perf_exploit[rep_i,:]= P_test[rep_i][:,0].long()
 
             PP[s_i,c_i,k_i]=perf_explore
-            Q[s_i,c_i,k_i] = P_test[:,:,0]
+            # Q[s_i,c_i,k_i] = P_test[:,:,0]
             PP_t[s_i,c_i,k_i]= MPm[perf_exploit.long().cpu()]/mMPm
           
     
-np.savez('./output/vanilla_BO/rCer1.5/NOPRIOR_'+date.today().strftime("%y%m%d")+'_4channels_artRej_kappa20_lr001_5rnd.npz', PP=PP.cpu(), PP_t=PP_t.cpu(), Q=Q.cpu(),which_opt=which_opt, this_opt = this_opt, nrnd = nrnd, kappa = kappa)
+np.savez('Rose_baseline_old_'+date.today().strftime("%y%m%d")+'_4channels_artRej_kappa20_lr001_5rnd.npz', PP=PP.cpu(), PP_t=PP_t.cpu(), which_opt=which_opt, this_opt = this_opt, nrnd = nrnd, kappa = kappa)
