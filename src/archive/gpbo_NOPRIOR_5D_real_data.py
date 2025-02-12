@@ -33,6 +33,7 @@ def optimize(model, likelihood, training_iter, train_x, train_y, verbose= True):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)  # Includes GaussianLikelihood parameters lr= 0.01
     # "Loss" for GPs - the marginal log likelihood
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+    l = 0.0
 
     for i in range(training_iter):
         # Zero gradients from previous iteration
@@ -42,6 +43,7 @@ def optimize(model, likelihood, training_iter, train_x, train_y, verbose= True):
       
         # Calc loss and backprop gradients
         loss = -mll(output, train_y)
+        l += loss
         loss.backward()
 
         if verbose== True:
@@ -58,7 +60,7 @@ def optimize(model, likelihood, training_iter, train_x, train_y, verbose= True):
 
         optimizer.step()
 
-    return model, likelihood
+    return model, likelihood, l / training_iter
 
 
 # def create_ch2xy_4d(dim,sizes):
@@ -120,7 +122,7 @@ noise_min=0.25
 noise_max=10
 MaxQueries =200
 kappa=5.0
-nRep=10
+nRep=30
 total_size= np.prod(dim_sizes)
 
 #hyperparams = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries,n_dims+2), device=device) # hyperparameters
@@ -128,9 +130,11 @@ total_size= np.prod(dim_sizes)
 # YVAR = torch.zeros((n_subjects,n_cond, len(this_opt),nRep,MaxQueries,DimSearchSpace),device=device)
 PP = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries), device=device)
 PP_t = torch.zeros((n_subjects,n_cond, len(this_opt),nRep, MaxQueries), device=device)
+LOSS = torch.zeros((n_subjects,n_cond, len(this_opt),nRep, MaxQueries), device=device)
 # UCBMAP = torch.zeros((n_subjects,n_cond, len(this_opt),nRep,MaxQueries,DimSearchSpace),device=device)
-# Q = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries), device=device)
+Q = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries), device=device)
 # BQ = torch.zeros((n_subjects,n_cond,len(this_opt),nRep, MaxQueries), device=device)
+Train_time = torch.zeros((n_subjects,n_cond, len(this_opt),nRep, MaxQueries), device=device)
 
 
 for s_i in range(n_subjects): # for each subject
@@ -192,7 +196,9 @@ for s_i in range(n_subjects): # for each subject
 
             perf_explore= torch.zeros((nRep, MaxQueries), device=device)
             perf_exploit= torch.zeros((nRep, MaxQueries), device=device)
+            loss = torch.zeros((nRep, MaxQueries), device=device)
             perf_rsq= torch.zeros((nRep), device=device)
+            train_time = torch.zeros((nRep, MaxQueries), device=device)
             P_test =  torch.zeros((nRep, MaxQueries, 2), device=device)
             P_max_all_temp= torch.zeros((nRep, MaxQueries), device=device)
 
@@ -295,9 +301,11 @@ for s_i in range(n_subjects): # for each subject
                         # Update training data
                         m.set_train_data(x,y, strict=False)
 
+                    start_time = time.time()
                     m.train()
                     likf.train()
-                    m, likf= optimize(m, likf, 10, x, y, verbose= False)
+                    m, likf, l = optimize(m, likf, 10, x, y, verbose= False)
+                    train_time[rep_i, q] = time.time() - start_time
 
                     m.eval()
                     likf.eval()
@@ -325,6 +333,8 @@ for s_i in range(n_subjects): # for each subject
 
                     # Maximum response at time q 
                     P_max.append(BestQuery.item())
+                    loss[rep_i, q] = l
+
                     # store all info
                     #msr[s_i,c_i,k_i,rep_i,q] = MaxSeenResp
                     #YMU[s_i,c_i, k_i,rep_i,q,:]= MapPrediction
@@ -349,8 +359,10 @@ for s_i in range(n_subjects): # for each subject
                 perf_exploit[rep_i,:]= P_test[rep_i][:,0].long()
 
             PP[s_i,c_i,k_i]=perf_explore
-            # Q[s_i,c_i,k_i] = P_test[:,:,0]
+            Q[s_i,c_i,k_i] = P_test[:,:,0]
             PP_t[s_i,c_i,k_i]= MPm[perf_exploit.long().cpu()]/mMPm
+            Train_time[s_i, c_i, k_i] = train_time
+            LOSS[s_i, c_i, k_i] = loss
           
     
-np.savez('Rose_baseline_old_'+date.today().strftime("%y%m%d")+'_4channels_artRej_kappa20_lr001_5rnd.npz', PP=PP.cpu(), PP_t=PP_t.cpu(), which_opt=which_opt, this_opt = this_opt, nrnd = nrnd, kappa = kappa)
+np.savez('Rose_baseline_old_'+date.today().strftime("%y%m%d")+'_4channels_artRej_kappa5_lr001_5rnd.npz', PP=PP.cpu(), PP_t=PP_t.cpu(), LOSS= LOSS.detach().cpu().numpy(), Train_time=Train_time.detach().cpu().numpy(), Q = Q.cpu(), which_opt=which_opt, this_opt = this_opt, nrnd = nrnd, kappa = kappa)

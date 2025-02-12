@@ -47,6 +47,74 @@ def plot_PPs(data, kappa=5.0):
     plt.tight_layout()
     plt.show()
 
+def comparing_exploitation(data1, data2, kappa=5.0):
+    # Extract PP_t arrays
+    PP_t1 = data1['PP_t']
+    PP_t2 = data2['PP_t']
+
+    n_subjects = PP_t1.shape[0]
+    fig, axs = plt.subplots(1, n_subjects, figsize=(10, 5))
+
+    for i in range(n_subjects):
+        mean_PP_t1 = PP_t1[i, 0, 0, :, :].mean(axis=0)
+        std_PP_t1 = PP_t1[i, 0, 0, :, :].std(axis=0)
+        conf_interval_PP_t1 = 1.96 * std_PP_t1 / np.sqrt(PP_t1.shape[3])
+
+        mean_PP_t2 = PP_t2[i, 0, 0, :, :].mean(axis=0)
+        std_PP_t2 = PP_t2[i, 0, 0, :, :].std(axis=0)
+        conf_interval_PP_t2 = 1.96 * std_PP_t2 / np.sqrt(PP_t2.shape[3])
+
+        x_values = np.arange(mean_PP_t1.shape[0])
+
+        axs[i].plot(mean_PP_t1, color='blue')
+        axs[i].plot(mean_PP_t2, color='green')
+
+        axs[i].fill_between(x_values, mean_PP_t1 - conf_interval_PP_t1, mean_PP_t1 + conf_interval_PP_t1, color="blue", alpha=0.3)
+        axs[i].fill_between(x_values, mean_PP_t2 - conf_interval_PP_t2, mean_PP_t2 + conf_interval_PP_t2, color="green", alpha=0.3)
+
+        axs[i].set_title(f"Subject {i}")
+        axs[i].set_xlabel("Iterations")
+        axs[i].set_ylabel("Scores (%)")
+
+    fig.suptitle(f"Comparing Exploitation Scores with kappa={kappa}", fontsize=14, fontweight="bold")
+    plt.legend(["Simple GP", "SpatialTemporo GP"], loc="lower right")
+    plt.tight_layout()
+    plt.show()
+
+def comparing_exploration(data1, data2, kappa=5.0):
+    # Extract PP arrays
+    PP1 = data1['PP']
+    PP2 = data2['PP']
+
+    n_subjects = PP1.shape[0]
+    fig, axs = plt.subplots(1, n_subjects, figsize=(10, 5))
+
+    for i in range(n_subjects):
+        mean_PP1 = PP1[i, 0, 0, :, :].mean(axis=0)
+        std_PP1 = PP1[i, 0, 0, :, :].std(axis=0)
+        conf_interval_PP1 = 1.96 * std_PP1 / np.sqrt(PP1.shape[3])
+
+        mean_PP2 = PP2[i, 0, 0, :, :].mean(axis=0)
+        std_PP2 = PP2[i, 0, 0, :, :].std(axis=0)
+        conf_interval_PP2 = 1.96 * std_PP2 / np.sqrt(PP2.shape[3])
+
+        x_values = np.arange(mean_PP1.shape[0])
+
+        axs[i].plot(mean_PP1, color='blue')
+        axs[i].plot(mean_PP2, color='green')
+
+        axs[i].fill_between(x_values, mean_PP1 - conf_interval_PP1, mean_PP1 + conf_interval_PP1, color="blue", alpha=0.3)
+        axs[i].fill_between(x_values, mean_PP2 - conf_interval_PP2, mean_PP2 + conf_interval_PP2, color="green", alpha=0.3)
+
+        axs[i].set_title(f"Subject {i}")
+        axs[i].set_xlabel("Iterations")
+        axs[i].set_ylabel("Scores (%)")
+
+    fig.suptitle(f"Comparing Exploration Scores with kappa={kappa}", fontsize=14, fontweight="bold")
+    plt.legend(["Simple GP", "SpatialTemporo GP"], loc="lower right")
+    plt.tight_layout()
+    plt.show()
+
 def plot_Q(data, kappa=5.0):
 
     Q = data['Q']
@@ -75,21 +143,20 @@ def plot_Q(data, kappa=5.0):
 
 def plot_training_time(data, kappa=5.0):
 
-    T = data['Train_time']
-    print(T.shape)
+    T = data['Train_time'][:, 0, 0, :, :]
     n_subjects = T.shape[0]
     fig, axs = plt.subplots(1, n_subjects, figsize=(10, 5))
 
 
     for i in range(n_subjects):
 
-        mean_T = T[i].mean(axis=2).squeeze()
-        std_T = T[i].std(axis=2).squeeze()
+        mean_T = T[i].mean(axis=0)
+        std_T = T[i].std(axis=0)
         x_values = np.arange(mean_T.shape[0])
 
         axs[i].plot(mean_T, label=f'T', color='blue')
         axs[i].fill_between(x_values, mean_T - std_T, mean_T + std_T,
-            color="moccasin", alpha=0.2, label="95% Confidence Interval")
+            color="skyblue", alpha=0.2, label="95% Confidence Interval")
         
         axs[i].set_title(f"Subject {i}")
         axs[i].set_xlabel("Iterations")  # X-axis label for each subplot
@@ -99,102 +166,57 @@ def plot_training_time(data, kappa=5.0):
     plt.tight_layout()
     plt.show()
 
-
-
-def plot_loss(losses, T):
+def plot_loss(data, kappa=5.0):
     
-    for model_index in range(losses.shape[1]):
-        plt.plot(
-            range(T),  # Iterations on the x-axis
-            losses[:, model_index],  # Performance on the y-axis
-            label=f'Model {model_index + 1}'  # Label for the model
-        )
-    plt.ylim(-1.0,2.0) 
-    # Add labels, title, and legend
-    plt.xlabel("Iteration")
-    plt.ylabel("Average Loss")
-    plt.title("Loss Over Iterations")
-    plt.legend()
-    plt.show()
+    loss = data['LOSS'][:, 0, 0, :, :]
+    n_subjects = loss.shape[0]
+        
+    fig, axs = plt.subplots(1, n_subjects, figsize=(10, 5))
 
-def plot_values(predictions, T):
-    plt.figure(figsize=(12, 5))
-    plt.plot(range(T), predictions, label="Best candidate solution")
-    plt.xlabel("Iteration")
-    plt.ylabel("Value")
-    plt.title("Value Over Iterations")
-    plt.legend()
-    plt.show()
+    for i in range(n_subjects):
 
-def plot_partition_updates(model_updates, n_models, T):
-    # Prepare the data for eventplot
-    events = [[] for _ in range(n_models)]  # One list per model
-    for t, updates in enumerate(model_updates):
-        for model in updates:
-            events[model].append(t)
+        l = loss[i].mean(axis=0)
 
-    # Plot the eventplot
-    plt.eventplot(events, orientation='horizontal', lineoffsets=range(n_models), linelengths=0.8)
-
-    # Add labels and title
-    plt.xlabel("Iteration (t)")
-    plt.ylabel("Model Index (k)")
-    plt.title("Eventplot of Model Updates")
-    plt.yticks(range(n_models), labels=[f"Model {k}" for k in range(n_models)])
-    plt.grid(True, linestyle='--', alpha=0.7)
-
-    # Show the plot
-    plt.show()
-
-def plot_exploration_exploitation(exploration_performance, exploitation_performance, T):
-    
-    # Plot exploration performance over iterations
-    plt.figure(figsize=(12, 5))
-
-    plt.subplot(1, 2, 1)
-    plt.plot(
-        range(T),  # Iterations on the x-axis
-        exploration_performance) # Performance on the y-axis)
-    # Add labels, title, and legend
-    plt.xlabel('Iteration')
-    plt.ylabel('Exploration Performance')
-    plt.title('Exploration Score for each Model')
-    plt.legend()
-
-    # Plot exploitation performance over iterations
-    plt.subplot(1, 2, 2)
-    plt.plot(
-        range(T),  # Iterations on the x-axis
-        exploitation_performance,  # Performance on the y-axis
-    )
-    plt.xlabel("Iteration")
-    plt.ylabel('Exploitation Performance')
-    plt.title('Exploitation Score for each Model')
-    plt.legend()
-
+        axs[i].plot(l, label=f'loss', color='blue')
+        axs[i].set_title(f"Subject {i}")
+        axs[i].set_xlabel("Iterations")  # X-axis label for each subplot
+        axs[i].set_ylabel("Loss ")
+        
+    fig.suptitle(f"Loss curves with kappa={kappa}", fontsize=14, fontweight="bold")    
     plt.tight_layout()
     plt.show()
 
-def plot_mae(maes, T):
-    for model_index in range(maes.shape[1]):
-        plt.plot(
-            range(T),  # Iterations on the x-axis
-            maes[:, model_index],  # Performance on the y-axis
-            label=f'Model {model_index + 1}'  # Label for the model
-        )
-    plt.xlabel("Iteration")
-    plt.ylabel("Mean Abs Error")
-    plt.title("MAE Over Iterations")
+def plot_loss(data, kappa=5.0):
+    loss = data['LOSS'][:, 0, 0, :, :]
+    n_subjects = loss.shape[0]
+
+    plt.figure(figsize=(10, 5))
+
+    for i in range(n_subjects):
+        l = loss[i].mean(axis=0)
+        plt.plot(l, label=f'Subject {i}')  # Different color for each subject
+
+    plt.title(f"Loss curves with kappa={kappa}", fontsize=14, fontweight="bold")
+    plt.xlabel("Iterations")
+    plt.ylabel("Loss")
     plt.legend()
+    plt.grid(True)  # Optional: adds a grid for better readability
     plt.show()
 
-    
-    
+
+
 
 if __name__ == '__main__':
 
-    filepath = './output/experiments/TemporoSpatialGP_250211_4channels_artRej_kappa20_lr001_5rnd.npz'
-    data = load_results(filepath)
-    plot_training_time(data)
+    #filepath = './output/experiments/Rose_baseline_old_250212_4channels_artRej_kappa5_lr001_5rnd.npz'
+    filepath1 = './output/experiments/VanillaGPBO_250212_4channels_artRej_kappa20_lr001_5rnd.npz'
+    filepath2 = './output/experiments/TemporoSpatialGP_250212_4channels_artRej_kappa20_lr001_5rnd.npz'
+
+    data1 = load_results(filepath1)
+    data2 = load_results(filepath2)
+    #comparing_exploitation(data1, data2)
+    comparing_exploration(data1, data2)
+    #plot_training_time(data)
     #plot_Q(data)
     #plot_PPs(data)
+    #plot_loss(data)
