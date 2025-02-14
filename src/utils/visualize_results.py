@@ -208,15 +208,14 @@ def plot_loss(data, kappa=5.0):
 
 if __name__ == '__main__':
 
-    #filepath = './output/experiments/Rose_baseline_old_250212_4channels_artRej_kappa5_lr001_5rnd.npz'
-    filepath1 = './output/experiments/VanillaGPBO_250212_4channels_artRej_kappa20_lr001_5rnd.npz'
-    filepath2 = './output/experiments/TemporoSpatialGP_250212_4channels_artRej_kappa20_lr001_5rnd.npz'
-
+    filepath = './output/experiments/VanillaGPBO_250212_4channels_artRej_kappa20_lr001_5rnd.npz'
+    filepath1 = './output/experiments/TemporoSpatialGP_250212_4channels_artRej_kappa20_lr001_5rnd.npz'
+    filepath2 = './output/experiments/TemporoSpatialGP_250214_4channels_artRej_lr001_5rnd.npz'
     data1 = load_results(filepath1)
     data2 = load_results(filepath2)
-    #comparing_exploitation(data1, data2)
+    comparing_exploitation(data1, data2)
     comparing_exploration(data1, data2)
     #plot_training_time(data)
     #plot_Q(data)
-    #plot_PPs(data)
+    plot_PPs(data1)
     #plot_loss(data)
