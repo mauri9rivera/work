@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-import seaborn as sns
+#import seaborn as sns
 import numpy as np
 
 def load_results(filepath):
@@ -208,14 +208,17 @@ def plot_loss(data, kappa=5.0):
 
 if __name__ == '__main__':
 
-    filepath = './output/experiments/VanillaGPBO_250212_4channels_artRej_kappa20_lr001_5rnd.npz'
-    filepath1 = './output/experiments/TemporoSpatialGP_250212_4channels_artRej_kappa20_lr001_5rnd.npz'
-    filepath2 = './output/experiments/TemporoSpatialGP_250214_4channels_artRej_lr001_5rnd.npz'
-    data1 = load_results(filepath1)
-    data2 = load_results(filepath2)
-    comparing_exploitation(data1, data2)
-    comparing_exploration(data1, data2)
-    #plot_training_time(data)
+    filepath_vanilla = './output/experiments/VanillaGPBO_250216_4channels_artRej_lr001_5rnd.npz'
+    filepath_spatiotemp = './output/experiments/ParallelizedGP_250216_4channels_artRej_lr001_5rnd.npz'
+    filepath_parallelized = './output/experiments/TemporoSpatialGP_250214_4channels_artRej_lr001_5rnd.npz'
+    data_vanilla = load_results(filepath_vanilla)
+    data_spatiotemp = load_results(filepath_spatiotemp)
+    data_parallelized = load_results(filepath_parallelized)
+    comparing_exploitation(data_vanilla, data_parallelized)
+    comparing_exploration(data_vanilla, data_parallelized)
+    plot_training_time(data_parallelized)
+    plot_training_time(data_spatiotemp)
+    plot_training_time(data_vanilla)
     #plot_Q(data)
-    plot_PPs(data1)
+    #plot_PPs(data_parallelized)
     #plot_loss(data)

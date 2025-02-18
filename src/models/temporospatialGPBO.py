@@ -26,7 +26,7 @@ from functools import reduce
 ### MODULES HANDLING ###
 sys.path.append(str(Path('./').resolve().parent.parent))
 from model_utils import optimize
-from gaussians import TemporoSpatialGP
+from gaussians import TemporoSpatialGP, ParallelizedGP
 
 ### GLOBAL VARIABLES ###
 DEVICE = 'cuda' #'cuda'
@@ -257,4 +257,4 @@ if __name__ == '__main__':
 
     options = {} # Here's where you change the hyperparams and whatnot
     options['kappa'] = 5.0
-    temporospatialGPBO(TemporoSpatialGP, np.array([5.0]))
+    temporospatialGPBO(TemporoSpatialGP, np.array([5.0])) # temporospatialGPBO(ParallelizedGP, np.array([5.0]))

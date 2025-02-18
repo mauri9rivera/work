@@ -11,6 +11,7 @@ import math
 import datetime
 from sklearn.decomposition import PCA
 import pandas as pd
+import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 import itertools
 from mpl_toolkits.mplot3d import Axes3D
@@ -21,10 +22,11 @@ from botorch.models import SingleTaskGP
 from functools import reduce
 
 
+
 ### MODULES HANDLING ###
 sys.path.append(str(Path('./').resolve().parent.parent))
 from model_utils import optimize
-from gaussians import GP
+from gaussians import GP, AdditiveLearningGP
 
 ### GLOBAL VARIABLES ###
 DEVICE = 'cuda' #'cuda'
@@ -58,8 +60,135 @@ def create_mean_map(resp):
 
     return mean_map
 
+
+### Kernel Learning Functions ###
+def sample_categorical(prob_partition, size):
+    #e.g. sample_cateogircal([0.1, 0.1, 0.4, 0.2, 0.2], 4) = array([2, 2, 2, 3])
+    return np.random.choice(len(prob_partition), size=size, p=prob_partition)
+
+def sample_struct_priors(xx, yy, fixhyp):
+    dx = xx.shape[1]
+    n_partition = dx
+
+    hyp = {}
+    #model = SingleTaskGP(xx, yy, outcome_transform=Standardize(m=1))
+    likelihood = gpytorch.likelihoods.GaussianLikelihood()
+    xx = xx.to(DEVICE)
+    yy = yy.to(DEVICE)
+    likelihood = likelihood.to(DEVICE)
+    model = GP(xx, yy, likelihood, gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims= n_partition)))
+    model = model.to(DEVICE)
+    
+
+    if all(k in fixhyp for k in ["l", "sigma", "sigma0"]):
+        hyp["l"] = fixhyp["l"]
+        hyp["sigma"] = fixhyp["sigma"]
+        hyp["sigma0"] = fixhyp["sigma0"]
+        decomp = learn_partition(xx, yy, hyp, fixhyp, n_partition, model, likelihood)
+    else:
+        prob_partition = np.ones(n_partition) / n_partition
+        decomp = fixhyp.get("z", sample_categorical(prob_partition, dx))
+
+        # GPytorch Model Training
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+
+        training_iter = 50
+        model.train()
+        likelihood.train()
+
+        for i in range(training_iter):
+            optimizer.zero_grad()
+            output = model(model.train_inputs[0])
+            loss = -mll(output, model.train_targets).mean()
+            loss.backward()
+            optimizer.step()
+
+        # Extract optimized hyperparameters
+        hyp["l"] = model.covar_module.base_kernel.lengthscale.detach().cpu().numpy().squeeze()
+
+        hyp["sigma"] = model.covar_module.outputscale.detach().cpu().numpy()
+        hyp["sigma0"] = model.likelihood.noise.detach().cpu().numpy()
+
+        decomp = learn_partition(xx, yy, hyp, fixhyp, n_partition, model, likelihood)
+        hyp["z"] = decomp
+        
+
+    return decomp, hyp
+
+def learn_partition(xx, yy, hyp, fixhyp, n_partition, model, likf):
+    if "decomp" in fixhyp:
+        return fixhyp["decomp"]
+
+    N_gibbs = 100
+    gibbs_iter = N_gibbs // 2
+    dim_limit = 3
+    maxNdata = 750
+
+    Nidx = min(maxNdata, xx.shape[0])
+    xx = xx[:Nidx]
+    yy = yy[:Nidx]
+
+    hyp_dirichlet = np.ones(n_partition)
+    prob_partition = hyp_dirichlet / hyp_dirichlet.sum()
+
+    z = fixhyp.get("z", sample_categorical(prob_partition, xx.shape[1]))
+
+    z_best = z.copy()
+    minnlz = float('inf')
+
+    for i in range(N_gibbs):
+        for d in range(xx.shape[1]):
+            log_prob = np.full(n_partition, -np.inf)
+            nlz = np.full(n_partition, float('inf'))
+
+            for a in range(n_partition):
+                z[d] = a
+
+                if i >= gibbs_iter and np.sum(z == a) >= dim_limit:
+                    continue
+
+                mll = ExactMarginalLogLikelihood(likf, model)
+                model.train()
+                nlz[a] = -mll(model(model.train_inputs[0]), model.train_targets).item()
+                log_prob[a] = np.log(np.sum(z == a) + hyp_dirichlet[a]) - nlz[a]
+
+            z[d] = np.argmax(log_prob - np.log(-np.log(np.random.rand(n_partition))))
+
+            if minnlz > nlz[z[d]]:
+                z_best = z.copy()
+                minnlz = nlz[z[d]]
+
+    return z_best
+
+def partition_helper(arr):
+    result = [[i for i, val in enumerate(arr) if val == y] for y in arr]
+    result = [sublist for sublist in result if sublist]
+    unique_lst = []
+    for sublist in result:
+        if sublist not in unique_lst:
+            unique_lst.append(sublist)
+
+    return unique_lst
+
+def lengthscales_helper(model, old: list):
+
+    ordered_lengthscales, ordered_outputscales = [], []
+
+    for dim in range(model.n_dims):
+
+        for idx, sublist in enumerate(old):
+
+            if dim in sublist:
+                
+                ordered_lengthscales.append(model.kernels[idx].base_kernel.lengthscale[0]) #TODO: affected by ard_num_dims model.covar_module.base_kernel.lengthscale[idx][dim]
+                ordered_outputscales.append(model.kernels[idx].outputscale)
+
+    return ordered_lengthscales, ordered_outputscales
+
+
 ### GPBO ###
-def neurostim_BO(GP_model, this_opt, options=None):
+def additive_learningGPBO(GP_model, this_opt, options=None):
 
     # Setting default options
     if options is None:
@@ -94,11 +223,9 @@ def neurostim_BO(GP_model, this_opt, options=None):
     #Metrics initialization
     PP = torch.zeros((n_subjects,1,len(this_opt),nRep, MaxQueries), device=DEVICE)
     PP_t = torch.zeros((n_subjects,1, len(this_opt),nRep, MaxQueries), device=DEVICE)
-    Q = torch.zeros((n_subjects,1,len(this_opt),nRep, MaxQueries), device=DEVICE)
     LOSS = torch.zeros((n_subjects,1, len(this_opt),nRep, MaxQueries), device=DEVICE)
+    Q = torch.zeros((n_subjects,1,len(this_opt),nRep, MaxQueries), device=DEVICE)
     Train_time = torch.zeros((n_subjects,1, len(this_opt),nRep, MaxQueries), device=DEVICE)
-
-
 
     for s_idx in range(n_subjects):
 
@@ -112,18 +239,12 @@ def neurostim_BO(GP_model, this_opt, options=None):
         # Put a  prior on the two lengthscale hyperparameters, the variance and the noise
         #The lengthscale parameter is parameterized on a log scale to constrain it to be positive
         #The outputscale parameter is parameterized on a log scale to constrain it to be positive
-        priorbox= gpytorch.priors.SmoothedBoxPrior(a=math.log(rho_low),b= math.log(rho_high), sigma=0.01) 
-        priorbox2= gpytorch.priors.SmoothedBoxPrior(a=math.log(0.01**2),b= math.log(100.0**2), sigma=0.01) # std
-        matk= gpytorch.kernels.MaternKernel(nu=2.5, ard_num_dims= n_dims, lengthscale_prior= priorbox)
-
-        matk_scaled = gpytorch.kernels.ScaleKernel(matk, outputscale_prior= priorbox2)
-        matk_scaled.base_kernel.lengthscale= [1.0]*n_dims
-        matk_scaled.outputscale= [1.0]
+        lengthscale_prior= gpytorch.priors.SmoothedBoxPrior(a=math.log(rho_low),b= math.log(rho_high), sigma=0.01) 
         prior_lik= gpytorch.priors.SmoothedBoxPrior(a=noise_min**2,b= noise_max**2, sigma=0.01) # gaussian noise variance
         likf= gpytorch.likelihoods.GaussianLikelihood(noise_prior= prior_lik)
         likf.noise= [1.0] 
 
-         #Initialize subject metrics
+        #Initialize subject metrics
         perf_explore= torch.zeros((nRep, MaxQueries), device=DEVICE)
         perf_exploit= torch.zeros((nRep, MaxQueries), device=DEVICE)
         loss = torch.zeros((nRep, MaxQueries), device=DEVICE)
@@ -151,7 +272,7 @@ def neurostim_BO(GP_model, this_opt, options=None):
                 
                 #Find next point (max of acquisition function)
                 else:
-                
+            
                     if torch.isnan(MapPrediction).any():
                         print('nan in Mean map pred')
                         MapPrediction = torch.nan_to_num(MapPrediction)
@@ -191,32 +312,48 @@ def neurostim_BO(GP_model, this_opt, options=None):
                 
                 # Initialization of the model and the constraint of the Gaussian noise 
                 if q==0:
-                    matk_scaled.base_kernel.lengthscale= hyp[:n_dims] # Update the initial value of the parameters 
-                    matk_scaled.outputscale= hyp[n_dims]
+                    kernel_hyps = {}
+                    z, kernel_hyps = sample_struct_priors(x, y, kernel_hyps)
+                    partition = partition_helper(z)
+                    print(f'Iter {q} - Decomposition of inputs: {partition}')
                     likf.noise= hyp[n_dims+1]
-                    m = m= GP_model(x, y, likf, matk_scaled)#GP_model(x, y, likf, [priorbox, priorbox2], 3, 2)#m= GP_model(x, y, likf, matk_scaled)
+                    model = GP_model(x, y, likf, lengthscale_prior, partition) 
+                    print(f'The model was properly initialized')
                     if DEVICE=='cuda':
-                        m=m.cuda()
-                        likf=likf.cuda()    
-                # Update training data     
+                        model=model.cuda()
+                        likf=likf.cuda()
+                elif q % 20 == 0:
+                    z, hyp = sample_struct_priors(x, y, kernel_hyps)
+                    old_partition = partition
+                    partition = partition_helper(z)
+                    print(f'Iter {q} - Decomposition of inputs: {partition}')
+                    ordered_lengthscales, ordered_outputscales = lengthscales_helper(model, old_partition)
+                    print(f'Here is the order of the kernels ordered: {ordered_lengthscales}')
+                    model = GP_model(x, y, likf, ordered_lengthscales, partition) 
+                    print(f'The model was properly initialized for update')
+                    if DEVICE=='cuda':
+                        model=model.cuda()
+                        likf=likf.cuda()
                 else:
-                    m.set_train_data(x,y, strict=False)
+                    model.set_train_data(x,y, strict=False)
 
                 start_time = time.time()
                 #Training and optimizing model
-                m.train()
+                model.train()
                 likf.train()
-                m, likf, l = optimize(m, likf, 10, x, y, verbose= False)
+                print(f'device of model: {model.device}')
+                print(f'device of one kernel? {model.kernels[0].device}')
+                model, likf, l = optimize(model, likf, 10, x, y, verbose= False)
 
                 train_time[rep_i, q] = time.time() - start_time
 
                 #Evaluating model
-                m.eval()
+                model.eval()
                 likf.eval()
 
                 with torch.no_grad():
                     X_test= ch2xy  
-                    observed_pred = likf(m(X_test))
+                    observed_pred = likf(model(X_test))
 
                 VarianceMap= observed_pred.variance
                 MapPrediction= observed_pred.mean
@@ -234,18 +371,7 @@ def neurostim_BO(GP_model, this_opt, options=None):
                 # Maximum response at time q 
                 P_max.append(BestQuery.item())
                 loss[rep_i, q] = l
-                '''
-                hyp= torch.tensor([m.covar_module.base_kernel.lengthscale[0][0].item(),
-                                m.covar_module.base_kernel.lengthscale[0][1].item(),
-                                m.covar_module.base_kernel.lengthscale[0][2].item(),
-                                m.covar_module.base_kernel.lengthscale[0][3].item(),
-                                m.covar_module.base_kernel.lengthscale[0][4].item(),
-                                m.covar_module.outputscale.item(),
-                                m.likelihood.noise[0].item()], device=DEVICE)
-                '''
-                #hyperparams[s_i, c_i, k_i,rep_i,q,:] = hyp    0
                 q+=1
-
 
             # estimate current exploration performance: knowledge of best stimulation point    
             perf_explore[rep_i,:]=MPm[P_max].reshape((len(MPm[P_max])))/mMPm
@@ -257,15 +383,11 @@ def neurostim_BO(GP_model, this_opt, options=None):
         PP_t[s_idx,0,0]= MPm[perf_exploit.long().cpu()]/mMPm
         Train_time[s_idx, 0, 0] = train_time
         LOSS[s_idx,0,0] = loss
-       
 
-    np.savez('./output/experiments/'+ m.name+'_'+datetime.date.today().strftime("%y%m%d")+'_4channels_artRej_lr001_5rnd.npz', PP=PP.cpu(), PP_t=PP_t.cpu(), LOSS= LOSS.detach().cpu().numpy(), Train_time=Train_time.detach().cpu().numpy(), Q = Q.cpu(), this_opt = this_opt, nrnd = nrnd, kappa = kappa, options=options)
+    np.savez('./output/experiments/'+ model.name+'_'+datetime.date.today().strftime("%y%m%d")+'_4channels_artRej_lr001_5rnd.npz', PP=PP.cpu(), PP_t=PP_t.cpu(), LOSS= LOSS.detach().cpu().numpy(), Train_time=Train_time.detach().cpu().numpy(), Q = Q.cpu(), this_opt = this_opt, nrnd = nrnd, kappa = kappa)
 
-    return m
 
 if __name__ == '__main__':
-
-    
 
     # Note: currently setup for peak_map response
     data = scipy.io.loadmat(FILE_PATH)['stim_combinations'] #scipy.io.loadmat(file_path)['Data']
@@ -280,4 +402,4 @@ if __name__ == '__main__':
 
     options = {} # Here's where you change the hyperparams and whatnot
     options['kappa'] = 5.0
-    neurostim_BO(GP, np.array([5.0]))
+    additive_learningGPBO(AdditiveLearningGP, np.array([5.0])) # temporospatialGPBO(ParallelizedGP, np.array([5.0]))
